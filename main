@@ -1,0 +1,79 @@
+#include <stdio.h>
+#include <unistd.h>
+#include <string.h>
+#include <semaphore.h>
+
+#define MSG_SIZE 256
+#define MSG_COUNT 10
+
+int main() {
+    int fd[2]; // массив для хранения файловых дескрипторов
+    pid_t pid; // переменная для хранения идентификатора процесса
+
+    sem_t *sem; //семафор
+
+    char msg_buf[MSG_SIZE]; // буфер для хранения сообщений
+    int msg_counter = 0; // счетчик сообщений
+
+    // создание канала
+    if (pipe(fd) < 0) {
+        perror("pipe error");
+        return -1;
+    }
+
+    // создание семафора
+    sem = sem_open("/my_semaphore", O_CREAT, 0666, 1);
+    if (sem == SEM_FAILED) {
+        perror("semaphore initilization failed");
+        return -1;
+    }
+
+    // создание дочернего процесса
+    if ((pid = fork()) < 0) {
+        perror("fork error");
+        return -1;
+    }
+
+    if (pid > 0) {
+        // родительский процесс
+
+        while (msg_counter < MSG_COUNT * 2) {
+            sem_wait(sem); // ждем, пока дочерний процесс не будет готов принять сообщение
+
+            // записываем сообщение в канал
+            sprintf(msg_buf, "Message from parent #%d", msg_counter);
+            write(fd[1], msg_buf, strlen(msg_buf) + 1);
+            printf("Parent sent message: %s\n", msg_buf);
+
+            msg_counter++;
+            sem_post(sem);
+        }
+
+        close(fd[0]);
+        close(fd[1]);
+
+        // удаление семафора
+        sem_destroy(sem);
+    } else {
+        // дочерний процесс
+
+        while (msg_counter < MSG_COUNT * 2) {
+            sem_wait(sem); // ждем, пока родительский процесс не будет готов принять сообщение
+
+            // чтение сообщения из канала
+            read(fd[0], msg_buf, MSG_SIZE);
+            printf("Child received message: %s\n", msg_buf);
+
+            msg_counter++;
+            sem_post(sem);
+        }
+
+        close(fd[0]);
+        close(fd[1]);
+
+        // удаление семафора
+        sem_destroy(sem);
+    }
+
+    return 0;
+}
